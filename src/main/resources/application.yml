@@ -1,0 +1,46 @@
+spring:
+  application:
+    name: finpay
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/finpay}
+    username: ${DB_USERNAME:finpay}
+    password: ${DB_PASSWORD:finpay}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+security:
+  jwt:
+    secret: ${JWT_SECRET:OvV0amf4BkIVrRXFpVsgVd7tr0QyySpJydiEAsCv/qQ=}
+    access-token-expiration: ${JWT_ACCESS_TOKEN_EXPIRATION:900000}
+    refresh-token-expiration: ${JWT_REFRESH_TOKEN_EXPIRATION:2592000000}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include:
+          - health
+          - info
+
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{requestId}] %logger{36} - %msg%n"
