@@ -62,7 +62,6 @@ public class IdempotencyRecord {
             User user,
             String idempotencyKey,
             String requestHash) {
-        this.id = UUID.randomUUID();
         this.user = user;
         this.idempotencyKey = idempotencyKey;
         this.requestHash = requestHash;
@@ -71,9 +70,7 @@ public class IdempotencyRecord {
 
     public void associateTransaction(LedgerTransaction transaction) {
         if (this.transaction != null) {
-            throw new IllegalStateException(
-                    "Idempotency record already has a transaction"
-            );
+            throw new IllegalStateException("Idempotency record already has a transaction");
         }
 
         this.transaction = transaction;

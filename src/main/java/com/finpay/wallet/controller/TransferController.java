@@ -22,14 +22,16 @@ public class TransferController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public TransferResponse transfer(
-        Authentication authentication,
-        @Valid @RequestBody TransferRequest request
+            Authentication authentication,
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
+            @Valid @RequestBody TransferRequest request
     ) {
         return transferService.transfer(
-            authentication.getName(),
-            request.senderWalletId(),
-            request.receiverWalletId(),
-            request.amount()
+                authentication.getName(),
+                request.senderWalletId(),
+                request.receiverWalletId(),
+                request.amount(),
+                idempotencyKey
         );
     }
 }

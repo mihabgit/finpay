@@ -1,4 +1,3 @@
-
 package com.finpay.wallet.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -12,10 +11,8 @@ import com.finpay.wallet.service.TransferService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -47,10 +44,10 @@ class TransferControllerIntegrationTest {
 
     @Container
     static final PostgreSQLContainer<?> postgres =
-        new PostgreSQLContainer<>("postgres:17")
-            .withDatabaseName("finpay_transfer_test")
-            .withUsername("finpay")
-            .withPassword("finpay");
+            new PostgreSQLContainer<>("postgres:17")
+                    .withDatabaseName("finpay_transfer_test")
+                    .withUsername("finpay")
+                    .withPassword("finpay");
 
     @DynamicPropertySource
     static void configureDatabase(DynamicPropertyRegistry registry) {
@@ -85,19 +82,22 @@ class TransferControllerIntegrationTest {
     private UUID senderWalletId;
     private UUID receiverWalletId;
     private String senderEmail;
+    private String idempotencyKey;
 
     @BeforeEach
     void setUp() throws Exception {
         String suffix = UUID.randomUUID().toString();
 
+        idempotencyKey = UUID.randomUUID().toString();
+
         senderEmail = "sender-" + suffix + "@example.com";
 
         senderToken = registerAndLogin(
-            "sender-" + suffix + "@example.com", "Sender"
+                "sender-" + suffix + "@example.com", "Sender"
         );
 
         receiverToken = registerAndLogin(
-            "receiver-" + suffix + "@example.com", "Receiver"
+                "receiver-" + suffix + "@example.com", "Receiver"
         );
 
         senderWalletId = createWallet(senderToken, "MYR");
@@ -113,15 +113,16 @@ class TransferControllerIntegrationTest {
     void transfer_shouldUpdateBalancesAndPersistBalancedLedger() throws Exception {
 
         int transactionsBefore =
-            ledgerTransactionRepository.findAll().size();
+                ledgerTransactionRepository.findAll().size();
 
         mockMvc.perform(post("/api/v1/transfers")
-                .header("Authorization", bearer(senderToken))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(transferRequest(
-                    senderWalletId, receiverWalletId, "100.0000"
-                )))
-            .andExpect(status().isCreated());
+                        .header("Authorization", bearer(senderToken))
+                        .header("Idempotency-key", idempotencyKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(transferRequest(
+                                senderWalletId, receiverWalletId, "100.0000"
+                        )))
+                .andExpect(status().isCreated());
 
         assertBalance(senderWalletId, "400.0000");
         assertBalance(receiverWalletId, "150.0000");
@@ -175,30 +176,32 @@ class TransferControllerIntegrationTest {
         int transactionsBefore = ledgerTransactionRepository.findAll().size();
 
         mockMvc.perform(post("/api/v1/transfers")
-                .header("Authorization", bearer(senderToken))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(transferRequest(
-                    senderWalletId, receiverWalletId, "900.0000"
-                )))
-            .andExpect(status().isBadRequest());
+                        .header("Authorization", bearer(senderToken))
+                        .header("Idempotency-key", idempotencyKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(transferRequest(
+                                senderWalletId, receiverWalletId, "900.0000"
+                        )))
+                .andExpect(status().isBadRequest());
 
         assertBalance(senderWalletId, "500.0000");
         assertBalance(receiverWalletId, "50.0000");
 
         assertThat(ledgerTransactionRepository.findAll())
-            .hasSize(transactionsBefore);
+                .hasSize(transactionsBefore);
     }
 
     @Test
     void transfer_withAnotherUsersSenderWallet_shouldBeRejected() throws Exception {
 
         mockMvc.perform(post("/api/v1/transfers")
-                .header("Authorization", bearer(senderToken))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(transferRequest(
-                    receiverWalletId, senderWalletId, "10.0000"
-                )))
-            .andExpect(status().isNotFound());
+                        .header("Authorization", bearer(senderToken))
+                        .header("Idempotency-key", idempotencyKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(transferRequest(
+                                receiverWalletId, senderWalletId, "10.0000"
+                        )))
+                .andExpect(status().isNotFound());
 
         assertBalance(senderWalletId, "500.0000");
         assertBalance(receiverWalletId, "50.0000");
@@ -206,18 +209,19 @@ class TransferControllerIntegrationTest {
 
     @Test
     void transfer_betweenDifferentCurrencies_shouldBeRejected()
-        throws Exception {
+            throws Exception {
 
         UUID usdWalletId = createWallet(receiverToken, "USD");
         setBalance(usdWalletId, "100.0000");
 
         mockMvc.perform(post("/api/v1/transfers")
-                .header("Authorization", bearer(senderToken))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(transferRequest(
-                    senderWalletId, usdWalletId, "10.0000"
-                )))
-            .andExpect(status().isBadRequest());
+                        .header("Authorization", bearer(senderToken))
+                        .header("Idempotency-key", idempotencyKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(transferRequest(
+                                senderWalletId, usdWalletId, "10.0000"
+                        )))
+                .andExpect(status().isBadRequest());
 
         assertBalance(senderWalletId, "500.0000");
         assertBalance(usdWalletId, "100.0000");
@@ -226,12 +230,13 @@ class TransferControllerIntegrationTest {
     @Test
     void transfer_toSameWallet_shouldBeRejected() throws Exception {
         mockMvc.perform(post("/api/v1/transfers")
-                .header("Authorization", bearer(senderToken))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(transferRequest(
-                    senderWalletId, senderWalletId, "10.0000"
-                )))
-            .andExpect(status().isBadRequest());
+                        .header("Authorization", bearer(senderToken))
+                        .header("Idempotency-key", idempotencyKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(transferRequest(
+                                senderWalletId, senderWalletId, "10.0000"
+                        )))
+                .andExpect(status().isBadRequest());
 
         assertBalance(senderWalletId, "500.0000");
     }
@@ -239,107 +244,227 @@ class TransferControllerIntegrationTest {
     @Test
     void transfer_withInvalidAmount_shouldBeRejected() throws Exception {
         mockMvc.perform(post("/api/v1/transfers")
-                .header("Authorization", bearer(senderToken))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(transferRequest(
-                    senderWalletId, receiverWalletId, "-10.0000"
-                )))
-            .andExpect(status().isBadRequest());
+                        .header("Authorization", bearer(senderToken))
+                        .header("Idempotency-key", idempotencyKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(transferRequest(
+                                senderWalletId, receiverWalletId, "-10.0000"
+                        )))
+                .andExpect(status().isBadRequest());
 
         assertBalance(senderWalletId, "500.0000");
         assertBalance(receiverWalletId, "50.0000");
     }
 
     @Test
-    void transfer_withoutAuthentication_shouldBeRejected()
-        throws Exception {
+    void transfer_withZeroAmount_shouldBeRejectedWithoutChangingState() throws Exception {
+        long transactionsBefore = ledgerTransactionRepository.count();
 
         mockMvc.perform(post("/api/v1/transfers")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(transferRequest(
-                    senderWalletId, receiverWalletId, "10.0000"
-                )))
-            .andExpect(status().isForbidden());
+                        .header(HttpHeaders.AUTHORIZATION, bearer(senderToken))
+                        .header("Idempotency-key", UUID.randomUUID().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(transferRequest(senderWalletId, receiverWalletId, "0.0000")))
+                .andExpect(status().isBadRequest());
+
+        assertBalance(senderWalletId, "500.0000");
+        assertBalance(receiverWalletId, "50.0000");
+        assertEquals(transactionsBefore, ledgerTransactionRepository.count());
+    }
+
+    @Test
+    void transfer_withoutIdempotencyKey_shouldBeRejectedWithoutChangingState() throws Exception {
+        long transactionsBefore = ledgerTransactionRepository.count();
+
+        mockMvc.perform(post("/api/v1/transfers")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(senderToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(transferRequest(senderWalletId, receiverWalletId, "10.0000")))
+                .andExpect(status().isBadRequest());
+
+        assertBalance(senderWalletId, "500.0000");
+        assertBalance(receiverWalletId, "50.0000");
+        assertEquals(transactionsBefore, ledgerTransactionRepository.count());
+    }
+
+    @Test
+    void transfer_withInvalidAuthenticationToken_shouldBeRejected() throws Exception {
+        mockMvc.perform(post("/api/v1/transfers")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer not-a-valid-token")
+                        .header("Idempotency-key", UUID.randomUUID().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(transferRequest(senderWalletId, receiverWalletId, "10.0000")))
+                .andExpect(status().isForbidden());
+
+        assertBalance(senderWalletId, "500.0000");
+        assertBalance(receiverWalletId, "50.0000");
+    }
+
+    @Test
+    void transfer_withMalformedJson_shouldBeRejectedWithoutChangingState() throws Exception {
+        long transactionsBefore = ledgerTransactionRepository.count();
+
+        mockMvc.perform(post("/api/v1/transfers")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(senderToken))
+                        .header("Idempotency-key", UUID.randomUUID().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{not-valid-json"))
+                .andExpect(status().isBadRequest());
+
+        assertBalance(senderWalletId, "500.0000");
+        assertBalance(receiverWalletId, "50.0000");
+        assertEquals(transactionsBefore, ledgerTransactionRepository.count());
+    }
+
+    @Test
+    void transfer_withNonexistentSenderWallet_shouldReturnNotFound() throws Exception {
+        long transactionsBefore = ledgerTransactionRepository.count();
+        UUID missingWalletId = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/v1/transfers")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(senderToken))
+                        .header("Idempotency-key", UUID.randomUUID().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(transferRequest(missingWalletId, receiverWalletId, "10.0000")))
+                .andExpect(status().isNotFound());
+
+        assertBalance(senderWalletId, "500.0000");
+        assertBalance(receiverWalletId, "50.0000");
+        assertEquals(transactionsBefore, ledgerTransactionRepository.count());
+    }
+
+    @Test
+    void transfer_withNonexistentReceiverWallet_shouldReturnNotFound() throws Exception {
+        long transactionsBefore = ledgerTransactionRepository.count();
+        UUID missingWalletId = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/v1/transfers")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(senderToken))
+                        .header("Idempotency-key", UUID.randomUUID().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(transferRequest(senderWalletId, missingWalletId, "10.0000")))
+                .andExpect(status().isNotFound());
+
+        assertBalance(senderWalletId, "500.0000");
+        assertBalance(receiverWalletId, "50.0000");
+        assertEquals(transactionsBefore, ledgerTransactionRepository.count());
+    }
+
+    @Test
+    void transfer_withSameIdempotencyKeyAndSamePayload_shouldExecuteOnlyOnce() throws Exception {
+        long transactionsBefore = ledgerTransactionRepository.count();
+        String request = transferRequest(senderWalletId, receiverWalletId, "100.0000");
+
+        mockMvc.perform(post("/api/v1/transfers")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(senderToken))
+                        .header("Idempotency-key", idempotencyKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/v1/transfers")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(senderToken))
+                        .header("Idempotency-key", idempotencyKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isCreated());
+
+        assertBalance(senderWalletId, "400.0000");
+        assertBalance(receiverWalletId, "150.0000");
+        assertEquals(transactionsBefore + 1, ledgerTransactionRepository.count());
+    }
+
+    @Test
+    void transfer_withoutAuthentication_shouldBeRejected()
+            throws Exception {
+
+        mockMvc.perform(post("/api/v1/transfers")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(transferRequest(
+                                senderWalletId, receiverWalletId, "10.0000"
+                        )))
+                .andExpect(status().isForbidden());
     }
 
     private String registerAndLogin(String email, String name)
-        throws Exception {
+            throws Exception {
 
         mockMvc.perform(post("/api/v1/auth/register")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                    {
-                      "email": "%s",
-                      "password": "password123",
-                      "firstName": "%s",
-                      "lastName": "Test"
-                    }
-                    """.formatted(email, name)))
-            .andExpect(status().isCreated());
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "%s",
+                                  "password": "password123",
+                                  "firstName": "%s",
+                                  "lastName": "Test"
+                                }
+                                """.formatted(email, name)))
+                .andExpect(status().isCreated());
 
         String response = mockMvc.perform(post("/api/v1/auth/login")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                    {
-                      "email": "%s",
-                      "password": "password123"
-                    }
-                    """.formatted(email)))
-            .andExpect(status().isOk())
-            .andReturn()
-            .getResponse()
-            .getContentAsString();
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "email": "%s",
+                                  "password": "password123"
+                                }
+                                """.formatted(email)))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
 
         JsonNode json = objectMapper.readTree(response);
         return json.get("accessToken").asText();
     }
 
     private UUID createWallet(String token, String currency)
-        throws Exception {
+            throws Exception {
 
         String response = mockMvc.perform(post("/api/v1/wallets")
-                .header("Authorization", bearer(token))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                    {"currency": "%s"}
-                    """.formatted(currency)))
-            .andExpect(status().isCreated())
-            .andReturn()
-            .getResponse()
-            .getContentAsString();
+                        .header("Authorization", bearer(token))
+                        .header("Idempotency-key", UUID.randomUUID().toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currency": "%s"}
+                                """.formatted(currency)))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
 
         return UUID.fromString(
-            objectMapper.readTree(response).get("id").asText()
+                objectMapper.readTree(response).get("id").asText()
         );
     }
 
     private void setBalance(UUID walletId, String amount) {
         jdbcTemplate.update(
-            "UPDATE wallets SET balance = ? WHERE id = ?",
-            new BigDecimal(amount), walletId
+                "UPDATE wallets SET balance = ? WHERE id = ?",
+                new BigDecimal(amount), walletId
         );
     }
 
     private void assertBalance(UUID walletId, String expected) {
         Wallet wallet = walletRepository.findById(walletId)
-            .orElseThrow();
+                .orElseThrow();
 
         assertThat(wallet.getBalance().compareTo(
-            new BigDecimal(expected))).isZero();
+                new BigDecimal(expected))).isZero();
     }
 
     private String transferRequest(
-        UUID senderId,
-        UUID receiverId,
-        String amount
+            UUID senderId,
+            UUID receiverId,
+            String amount
     ) {
         return """
-            {
-              "senderWalletId": "%s",
-              "receiverWalletId": "%s",
-              "amount": %s
-            }
-            """.formatted(senderId, receiverId, amount);
+                {
+                  "senderWalletId": "%s",
+                  "receiverWalletId": "%s",
+                  "amount": %s
+                }
+                """.formatted(senderId, receiverId, amount);
     }
 
     private String bearer(String token) {
@@ -395,10 +520,8 @@ class TransferControllerIntegrationTest {
         long transactionsBefore = ledgerTransactionRepository.count();
 
         mockMvc.perform(post("/api/v1/transfers")
-                        .header(
-                                HttpHeaders.AUTHORIZATION,
-                                "Bearer " + senderToken
-                        )
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + senderToken)
+                        .header("Idempotency-key", idempotencyKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(
                                 Map.of(
@@ -407,7 +530,7 @@ class TransferControllerIntegrationTest {
                                         "amount", amount
                                 )
                         )))
-                .andExpect(status().isInternalServerError()); // need to change in future
+                .andExpect(status().isBadRequest());
 
         assertEquals(senderBalanceBefore, getBalance(fromWalletId));
         assertEquals(receiverBalanceBefore, getBalance(toWalletId));
@@ -462,7 +585,8 @@ class TransferControllerIntegrationTest {
                                 senderEmail,
                                 senderWalletId,
                                 receiverWalletId,
-                                transferAmount
+                                transferAmount,
+                                UUID.randomUUID().toString()
                         );
                         return true;
                     } catch (IllegalArgumentException ex) {
@@ -517,5 +641,211 @@ class TransferControllerIntegrationTest {
         );
     }
 
-}
 
+    @Test
+    void concurrentRequestsWithSameIdempotencyKey_shouldExecuteTransferOnlyOnce()
+            throws Exception {
+
+        int requestCount = 5;
+        BigDecimal transferAmount = new BigDecimal("100.0000");
+
+        BigDecimal senderBalanceBefore = getBalance(senderWalletId);
+        BigDecimal receiverBalanceBefore = getBalance(receiverWalletId);
+        long transactionsBefore = ledgerTransactionRepository.count();
+
+        ExecutorService executor = Executors.newFixedThreadPool(requestCount);
+        CountDownLatch ready = new CountDownLatch(requestCount);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<String>> results = new ArrayList<>();
+
+        try {
+            for (int i = 0; i < requestCount; i++) {
+                results.add(executor.submit(() -> {
+                    ready.countDown();
+
+                    if (!start.await(10, TimeUnit.SECONDS)) {
+                        throw new IllegalStateException(
+                                "Timed out waiting to start transfers"
+                        );
+                    }
+
+                    var response = transferService.transfer(
+                            senderEmail,
+                            senderWalletId,
+                            receiverWalletId,
+                            transferAmount,
+                            idempotencyKey
+                    );
+
+                    return response.reference();
+
+                }));
+            }
+
+            assertTrue(
+                    ready.await(10, TimeUnit.SECONDS),
+                    "Workers did not become ready in time"
+            );
+
+            // Release all workers as close together as possible.
+            start.countDown();
+
+            List<String> references = new ArrayList<>();
+
+            for (Future<String> result : results) {
+                references.add(result.get(30, TimeUnit.SECONDS));
+            }
+
+            // All requests must return the same transfer reference.
+            assertThat(references)
+                    .hasSize(requestCount)
+                    .doesNotContainNull()
+                    .containsOnly(references.getFirst());
+
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+
+            assertTrue(
+                    executor.awaitTermination(10, TimeUnit.SECONDS),
+                    "Transfer workers did not terminate in time"
+            );
+        }
+
+        // The shared request must debit and credit exactly once.
+        assertEquals(
+                0,
+                senderBalanceBefore.subtract(transferAmount)
+                        .compareTo(getBalance(senderWalletId))
+        );
+
+        assertEquals(
+                0,
+                receiverBalanceBefore.add(transferAmount)
+                        .compareTo(getBalance(receiverWalletId))
+        );
+
+        // Only one ledger transaction should have been created.
+        assertEquals(
+                transactionsBefore + 1,
+                ledgerTransactionRepository.count()
+        );
+    }
+
+
+    @Test
+    void concurrentRequestsWithSameIdempotencyKeyAndDifferentPayload_shouldNotDoubleTransfer()
+            throws Exception {
+        BigDecimal senderBalanceBefore = getBalance(senderWalletId);
+        BigDecimal receiverBalanceBefore = getBalance(receiverWalletId);
+        long transactionsBefore = ledgerTransactionRepository.count();
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try {
+            Callable<Integer> firstRequest = () -> performTransferAndGetStatus(
+                    "100.0000", ready, start);
+            Callable<Integer> secondRequest = () -> performTransferAndGetStatus(
+                    "200.0000", ready, start);
+
+            Future<Integer> first = executor.submit(firstRequest);
+            Future<Integer> second = executor.submit(secondRequest);
+
+            assertTrue(ready.await(10, TimeUnit.SECONDS), "Workers did not become ready in time");
+            start.countDown();
+
+            List<Integer> statuses = List.of(
+                    first.get(30, TimeUnit.SECONDS),
+                    second.get(30, TimeUnit.SECONDS));
+
+            assertThat(statuses).containsExactlyInAnyOrder(201, 409);
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS),
+                    "Transfer workers did not terminate in time");
+        }
+
+        // Exactly one of the two payloads may win; balances must reflect one transfer only.
+        BigDecimal senderAfter = getBalance(senderWalletId);
+        BigDecimal receiverAfter = getBalance(receiverWalletId);
+        BigDecimal senderDebit = senderBalanceBefore.subtract(senderAfter);
+        BigDecimal receiverCredit = receiverAfter.subtract(receiverBalanceBefore);
+
+        assertThat(senderDebit).isIn(new BigDecimal("100.0000"), new BigDecimal("200.0000"));
+        assertEquals(0, senderDebit.compareTo(receiverCredit));
+        assertEquals(transactionsBefore + 1, ledgerTransactionRepository.count());
+    }
+
+    private int performTransferAndGetStatus(
+            String amount,
+            CountDownLatch ready,
+            CountDownLatch start
+    ) throws Exception {
+        ready.countDown();
+        if (!start.await(10, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("Timed out waiting to start transfers");
+        }
+
+        return mockMvc.perform(post("/api/v1/transfers")
+                        .header(HttpHeaders.AUTHORIZATION, bearer(senderToken))
+                        .header("Idempotency-key", idempotencyKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(transferRequest(senderWalletId, receiverWalletId, amount)))
+                .andReturn()
+                .getResponse()
+                .getStatus();
+    }
+
+    @Test
+    void transfer_withSameIdempotencyKeyAndDifferentAmount_shouldReturnConflict()
+            throws Exception {
+
+        long transactionsBefore = ledgerTransactionRepository.count();
+
+        // First request: succeeds and transfers 100 MYR.
+        mockMvc.perform(post("/api/v1/transfers")
+                        .header("Authorization", bearer(senderToken))
+                        .header("Idempotency-key", idempotencyKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(transferRequest(
+                                senderWalletId,
+                                receiverWalletId,
+                                "100.0000"
+                        )))
+                .andExpect(status().isCreated());
+
+        // Verify the first transfer succeeded.
+        assertBalance(senderWalletId, "400.0000");
+        assertBalance(receiverWalletId, "150.0000");
+
+        long transactionsAfterFirstTransfer =
+                ledgerTransactionRepository.count();
+
+        assertEquals(transactionsBefore + 1, transactionsAfterFirstTransfer);
+
+        // Retry with the SAME key but a DIFFERENT amount.
+        mockMvc.perform(post("/api/v1/transfers")
+                        .header("Authorization", bearer(senderToken))
+                        .header("Idempotency-key", idempotencyKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(transferRequest(
+                                senderWalletId,
+                                receiverWalletId,
+                                "200.0000"
+                        )))
+                .andExpect(status().isConflict());
+
+        // The rejected request must not affect balances or create a transaction.
+        assertBalance(senderWalletId, "400.0000");
+        assertBalance(receiverWalletId, "150.0000");
+
+        assertEquals(
+                transactionsAfterFirstTransfer,
+                ledgerTransactionRepository.count()
+        );
+    }
+
+}
